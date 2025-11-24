@@ -1,12 +1,12 @@
 cask "bongo-cat" do
-    version "0.8.1"
+    version "0.8.2"
   
     if Hardware::CPU.intel?
       url "https://github.com/ayangweb/BongoCat/releases/latest/download/BongoCat_x64.app.tar.gz"
-      sha256 "ff77759a6ffbadd588d30eebffbb0b211a8a0db4b50ea4df02cabf61ae634976"
+      sha256 "60253b34971b5dda1fdeb0366566fd5a5c38b309ec6245549d20c7668170ab78"
     else
       url "https://github.com/ayangweb/BongoCat/releases/latest/download/BongoCat_aarch64.app.tar.gz"
-      sha256 "c1fa63f91e8c1d8112aed2c29d7eaaff435bd7a5d08f8cbe35eb347c07ba44a1"
+      sha256 "92f2e9b802d7ac01c33d6f9958e0c11723974be61eb6b635167541bd2c1cf24e"
     end
   
     name "BongoCat"
