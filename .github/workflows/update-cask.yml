@@ -40,8 +40,7 @@ jobs:
 
       - name: Stop if no update
         if: steps.check.outputs.update == 'false'
-        run: |
-          echo "No new version. Skip."
+        run: echo "No new version. Skip."
 
       - name: Download and calculate sha256
         if: steps.check.outputs.update == 'true'
@@ -59,22 +58,30 @@ jobs:
           echo "sha_x64=$sha_x64" >> $GITHUB_OUTPUT
           echo "sha_arm=$sha_arm" >> $GITHUB_OUTPUT
 
-      - name: Update cask file
+      - name: Update cask file (safe)
         if: steps.check.outputs.update == 'true'
         run: |
-          version=${{ steps.release.outputs.version }}
-          sha_x64=${{ steps.sha.outputs.sha_x64 }}
-          sha_arm=${{ steps.sha.outputs.sha_arm }}
+          version="${{ steps.release.outputs.version }}"
+          sha_x64="${{ steps.sha.outputs.sha_x64 }}"
+          sha_arm="${{ steps.sha.outputs.sha_arm }}"
 
-          sed -i "s/version \".*\"/version \"$version\"/" Casks/bongo-cat.rb
-          sed -i "s/sha256 arm: \".*\"/sha256 arm: \"$sha_arm\"/" Casks/bongo-cat.rb
-          sed -i "s/intel: \".*\"/intel: \"$sha_x64\"/" Casks/bongo-cat.rb
+          # 更新 version（只匹配行首，避免误伤）
+          sed -i 's/^  version ".*"/  version "'"$version"'"/' Casks/bongo-cat.rb
+
+          # 只在 sha256 block 内更新 arm
+          sed -i '/sha256 arm:/,/intel:/ s/sha256 arm: *".*"/sha256 arm: "'"$sha_arm"'"/' Casks/bongo-cat.rb
+
+          # 只在 sha256 block 内更新 intel
+          sed -i '/sha256 arm:/,/intel:/ s/intel: *".*"/intel: "'"$sha_x64"'"/' Casks/bongo-cat.rb
 
       - name: Commit and push
         if: steps.check.outputs.update == 'true'
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
+          # 防止远程有更新导致 push 失败
+          git pull --rebase
 
           git add Casks/bongo-cat.rb
 
