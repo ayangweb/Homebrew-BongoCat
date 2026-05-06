@@ -7,7 +7,7 @@ brew tap ayangweb/BongoCat
 2. 安装：
 
 ```bash
-brew install --no-quarantine bongo-cat
+brew install bongo-cat
 ```
 
 3. 更新：
