@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Get latest release version
         id: release
@@ -65,13 +67,11 @@ jobs:
           sha_x64="${{ steps.sha.outputs.sha_x64 }}"
           sha_arm="${{ steps.sha.outputs.sha_arm }}"
 
-          # 更新 version（只匹配行首，避免误伤）
+          # version
           sed -i 's/^  version ".*"/  version "'"$version"'"/' Casks/bongo-cat.rb
 
-          # 只在 sha256 block 内更新 arm
+          # sha256 (限定范围，避免误伤 arch)
           sed -i '/sha256 arm:/,/intel:/ s/sha256 arm: *".*"/sha256 arm: "'"$sha_arm"'"/' Casks/bongo-cat.rb
-
-          # 只在 sha256 block 内更新 intel
           sed -i '/sha256 arm:/,/intel:/ s/intel: *".*"/intel: "'"$sha_x64"'"/' Casks/bongo-cat.rb
 
       - name: Commit and push
@@ -80,13 +80,12 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # ✅ 先同步远程
-          git pull --rebase
-
-          # 再 add & commit（这时候才是干净状态）
           git add Casks/bongo-cat.rb
 
-          # 防止没有变化时报错
-          git diff --cached --quiet || git commit -m "chore: update bongo-cat cask to v${{ steps.release.outputs.version }}"
-
-          git push
+          # 没变化就不 commit
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update bongo-cat cask to v${{ steps.release.outputs.version }}"
+            git push
+          fi
