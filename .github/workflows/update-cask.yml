@@ -80,10 +80,13 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # 防止远程有更新导致 push 失败
+          # ✅ 先同步远程
           git pull --rebase
 
+          # 再 add & commit（这时候才是干净状态）
           git add Casks/bongo-cat.rb
 
-          git commit -m "chore: update bongo-cat cask to v${{ steps.release.outputs.version }}"
+          # 防止没有变化时报错
+          git diff --cached --quiet || git commit -m "chore: update bongo-cat cask to v${{ steps.release.outputs.version }}"
+
           git push
