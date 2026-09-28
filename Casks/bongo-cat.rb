@@ -11,7 +11,7 @@ cask "bongo-cat" do
          intel: "272c922b41394a87b57eb931d7398bce6b96ea35c8ebd6f29b0dbd0be66bb313"
 
   name "BongoCat"
-  desc "🐱 跨平台桌宠 BongoCat，为桌面增添乐趣！"
+  desc "🐱 BongoCat — A cross-platform interactive desktop pet that brings fun to your desktop!"
   homepage "https://github.com/ayangweb/BongoCat"
 
   app "BongoCat.app"
