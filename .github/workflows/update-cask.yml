@@ -18,65 +18,137 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get latest release version
+      - name: Read the latest release version
         id: release
         run: |
-          latest=$(curl -s https://api.github.com/repos/ayangweb/BongoCat/releases/latest | jq -r .tag_name)
+          set -euo pipefail
+          latest=$(curl -fsSL --retry 3 \
+            https://api.github.com/repos/ayangweb/BongoCat/releases/latest | jq -r .tag_name)
+          # The API is unauthenticated here, so a rate-limit response is a real
+          # possibility. Without this check the version became the string "null" and
+          # the cask was rewritten to `version "null"` — which is what happened.
+          if [[ ! "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::the releases API did not return a usable tag, got '$latest'" >&2
+            exit 1
+          fi
           version=${latest#v}
-          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Read current version
+      - name: Read the version the cask currently declares
         id: current
         run: |
-          current=$(grep -Eo 'version "[^"]+"' Casks/bongo-cat.rb | sed 's/version "\(.*\)"/\1/')
-          echo "current=$current" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          current=$(sed -n 's/^[[:space:]]*version "\([^"]*\)"$/\1/p' Casks/bongo-cat.rb)
+          if [[ -z "$current" ]]; then
+            echo "::error::could not read a version out of Casks/bongo-cat.rb" >&2
+            exit 1
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
 
-      - name: Check if update needed
+      - name: Decide whether an update is needed
         id: check
         run: |
+          set -euo pipefail
           if [ "${{ steps.current.outputs.current }}" = "${{ steps.release.outputs.version }}" ]; then
-            echo "update=false" >> $GITHUB_OUTPUT
+            echo "update=false" >> "$GITHUB_OUTPUT"
           else
-            echo "update=true" >> $GITHUB_OUTPUT
+            echo "update=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Stop if no update
+      - name: Report and stop when the cask is current
         if: steps.check.outputs.update == 'false'
-        run: echo "No new version. Skip."
+        run: echo "Cask is already at ${{ steps.current.outputs.current }}. Nothing to do."
 
-      - name: Download and calculate sha256
+      # The download URLs are built from the cask's own `url` and `arch` lines rather
+      # than written out again here. That is the whole point: this workflow used to
+      # hardcode `BongoCat_x64.app.tar.gz`, which stopped existing when 2.0.0 renamed
+      # the release payloads to `BongoCat-<version>-<triple>.app.tar.gz`, and nothing
+      # here noticed because the names were duplicated instead of shared.
+      - name: Download each architecture's payload and hash it
         if: steps.check.outputs.update == 'true'
         id: sha
         run: |
+          set -euo pipefail
           version=${{ steps.release.outputs.version }}
-          base="https://github.com/ayangweb/BongoCat/releases/download/v${version}"
 
-          curl -L -o x64.tar.gz "$base/BongoCat_x64.app.tar.gz"
-          curl -L -o arm.tar.gz "$base/BongoCat_aarch64.app.tar.gz"
+          url_template=$(sed -n 's/^[[:space:]]*url "\(.*\)"$/\1/p' Casks/bongo-cat.rb)
+          arch_arm=$(sed -n 's/^[[:space:]]*arch .*arm: "\([^"]*\)".*/\1/p' Casks/bongo-cat.rb)
+          arch_intel=$(sed -n 's/^[[:space:]]*arch .*intel: "\([^"]*\)".*/\1/p' Casks/bongo-cat.rb)
+          for value in "$url_template" "$arch_arm" "$arch_intel"; do
+            if [ -z "$value" ]; then
+              echo "::error::could not read the url or arch lines out of Casks/bongo-cat.rb" >&2
+              exit 1
+            fi
+          done
 
-          sha_x64=$(sha256sum x64.tar.gz | awk '{print $1}')
-          sha_arm=$(sha256sum arm.tar.gz | awk '{print $1}')
+          resolve() { # $1 = architecture token
+            local url=${url_template//\#\{version\}/$version}
+            echo "${url//\#\{arch\}/$1}"
+          }
 
-          echo "sha_x64=$sha_x64" >> $GITHUB_OUTPUT
-          echo "sha_arm=$sha_arm" >> $GITHUB_OUTPUT
+          fetch() { # $1 = architecture token, $2 = output path
+            local url
+            url=$(resolve "$1")
+            # stderr, not stdout: this function's stdout is captured as the hash, so a
+            # progress line on stdout would be prepended to it and corrupt the cask.
+            echo "fetching $url" >&2
+            # `-f` is what makes a 404 an error. Without it curl writes the error body
+            # to the file and exits 0, so the sha256 of a 404 page was being written
+            # into the cask — a cask that installs a corrupt app and reports success.
+            curl -fL --retry 3 --retry-delay 5 -o "$2" "$url"
+            # Belt and braces: a response body that is not a gzip cannot be the
+            # payload, and `file` says so even when the status line looked fine.
+            if ! file "$2" | grep -q 'gzip compressed data'; then
+              echo "::error::$2 is not a gzip archive; refusing to hash it" >&2
+              file "$2" >&2
+              exit 1
+            fi
+            sha256sum "$2" | awk '{print $1}'
+          }
 
-      - name: Update cask file (safe)
+          sha_arm=$(fetch "$arch_arm" arm.tar.gz)
+          sha_x64=$(fetch "$arch_intel" x64.tar.gz)
+
+          echo "sha_x64=$sha_x64" >> "$GITHUB_OUTPUT"
+          echo "sha_arm=$sha_arm" >> "$GITHUB_OUTPUT"
+
+      - name: Rewrite the cask's version and hashes
         if: steps.check.outputs.update == 'true'
         run: |
+          set -euo pipefail
           version="${{ steps.release.outputs.version }}"
           sha_x64="${{ steps.sha.outputs.sha_x64 }}"
           sha_arm="${{ steps.sha.outputs.sha_arm }}"
 
-          # version
-          sed -i 's/^  version ".*"/  version "'"$version"'"/' Casks/bongo-cat.rb
+          cask=Casks/bongo-cat.rb
 
-          # sha256 (限定范围，避免误伤 arch)
-          sed -i '/sha256 arm:/,/intel:/ s/sha256 arm: *".*"/sha256 arm: "'"$sha_arm"'"/' Casks/bongo-cat.rb
-          sed -i '/sha256 arm:/,/intel:/ s/intel: *".*"/intel: "'"$sha_x64"'"/' Casks/bongo-cat.rb
+          # `sed > tmp && mv` rather than `sed -i`: GNU and BSD sed disagree about
+          # whether `-i` takes an argument, and this is worth being able to run and
+          # check outside the runner too.
+          sed "s/^  version \".*\"/  version \"$version\"/" "$cask" > "$cask.tmp"
+          sed '/^  sha256 /,/^         intel:/ s/^  sha256 arm: *"[^"]*"/  sha256 arm: "'"$sha_arm"'"/' "$cask.tmp" > "$cask.tmp2"
+          sed '/^  sha256 /,/^         intel:/ s/^         intel: *"[^"]*"/         intel: "'"$sha_x64"'"/' "$cask.tmp2" > "$cask.tmp3"
+          mv "$cask.tmp3" "$cask"
+          rm -f "$cask.tmp" "$cask.tmp2"
+
+          # `sed` is silent when a pattern does not match, so an unexpected cask layout
+          # would leave the old sha256 in place and the commit would ship a cask whose
+          # hashes are for a different version. Check the result instead of trusting it,
+          # and put the file back if it is wrong so the next run starts from a clean tree.
+          for expected in "version \"$version\"" "sha256 arm: \"$sha_arm\"" "intel: \"$sha_x64\""; do
+            if ! grep -qF "$expected" "$cask"; then
+              echo "::error::the rewrite did not produce '$expected'" >&2
+              git --no-pager diff -- "$cask" >&2
+              git checkout -- "$cask"
+              exit 1
+            fi
+          done
+          ruby -c "$cask"
 
       - name: Commit and push
         if: steps.check.outputs.update == 'true'
         run: |
+          set -euo pipefail
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
