@@ -1,5 +1,5 @@
 cask "bongo-cat" do
-  version "2.2.0"
+  version "2.3.0"
 
   # 发布载荷名：`BongoCat-<version>-<arch>.app.tar.gz`，架构段是 `aarch64` / `x64`。
   # 1.x 时代是 `BongoCat_<arch>.app.tar.gz`（没有版本号），2.0.0 改成了带版本号的形式。
@@ -7,8 +7,8 @@ cask "bongo-cat" do
   arch arm: "aarch64", intel: "x64"
 
   url "https://github.com/ayangweb/BongoCat/releases/download/v#{version}/BongoCat-#{version}-#{arch}.app.tar.gz"
-  sha256 arm: "d411dd75f72478bf2c976da90951a36328c67ca21b35882ed1f76003d1d53d4f",
-         intel: "4f6973d1da5ee52741fb1bb4be342515dfe71bedf7324250815e130f201ef620"
+  sha256 arm: "e6d2add456216b738ca4061107735a4324ea403a81144834231f5423c9ca8849",
+         intel: "f0e5df1663e8826862ad7d04743cefdca98959956a46cdd0f6e6c98ecf7b7b91"
 
   name "BongoCat"
   desc "🐱 BongoCat — A cross-platform interactive desktop pet that brings fun to your desktop!"
